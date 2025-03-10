@@ -14,8 +14,6 @@ import requests
 from collections import OrderedDict
 import time
 from deepgram import Deepgram
-from energy_classifier import EnergyClassifier, EnergyLevel
-from typing import Tuple, List
 
 app = Flask(__name__)
 
@@ -89,9 +87,6 @@ HEADERS = ["Day", "Date", "Task 1", "Task 1 Status", "Task 2", "Task 2 Status", 
 MESSAGE_CACHE = OrderedDict()
 MESSAGE_CACHE_MAX_SIZE = 100
 MESSAGE_CACHE_TTL = 300  # 5 minutes in seconds
-
-# Initialize energy classifier
-energy_classifier = EnergyClassifier()
 
 def is_duplicate_message(message_id):
     """Check if a message has been recently processed."""
@@ -495,17 +490,17 @@ def webhook():
         message_type = message.get('type')
         
         if message_type == 'text':
-            message_text = message.get('text', {}).get('body', '')
+            message_text = message.get('text', {}).get('body', '').lower()
             
-            # First, try to handle as energy response
-            success, modified_tasks = handle_energy_response(message_text)
-            if success:
-                return jsonify({
-                    'status': 'success',
-                    'message': 'Energy response processed'
-                }), 200
+            # Check if this is a request for voice check-in
+            if 'check in' in message_text or 'checkin' in message_text:
+                if send_checkin_prompt():
+                    return jsonify({
+                        'status': 'success',
+                        'message': 'Check-in prompt sent'
+                    }), 200
             
-            # If not an energy response, process as before...
+            # Handle other text messages as before
             if message_text.strip().startswith('status update:'):
                 updates = parse_status_update(message_text)
                 if updates and save_status_updates(updates):
@@ -666,49 +661,16 @@ def get_todays_tasks():
         app.logger.error(f"Error getting today's tasks: {str(e)}")
         return None
 
-def send_energy_checkin():
-    """Send the morning energy level check-in message."""
-    try:
-        message = """Hey friend! 🌅 How are you feeling this morning? 
-
-I know mornings can be a lot sometimes, so just be honest with me! Whether you're:
-• Feeling that rare morning energy buzz ✨
-• Just kinda existing (which is totally valid!) 
-• Having a slow/foggy start 🌫️
-• Really struggling today 💜
-
-No judgment here - I get how energy levels can be all over the place with neurodiversity. We'll figure out today's game plan together, based on whatever you're working with! 🫂"""
-
-        return send_message(message)
-
-    except Exception as e:
-        app.logger.error(f"Error sending energy check-in: {str(e)}")
-        return False
-
-@app.route('/send-energy-checkin')
-def trigger_energy_checkin():
-    """Endpoint to trigger the morning energy check-in."""
-    try:
-        if send_energy_checkin():
-            return jsonify({
-                'status': 'success',
-                'message': 'Energy check-in sent successfully'
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': 'Failed to send energy check-in'
-            }), 400
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
 def send_daily_reminder():
     """Send daily reminder based on tasks from Google Sheets."""
     try:
         app.logger.info("Starting send_daily_reminder function")
+        
+        # Log WhatsApp credentials status
+        app.logger.info("Checking WhatsApp credentials:")
+        app.logger.info(f"WHATSAPP_TOKEN present: {bool(WHATSAPP_TOKEN)}")
+        app.logger.info(f"PHONE_NUMBER_ID present: {bool(PHONE_NUMBER_ID)}")
+        app.logger.info(f"RECIPIENT_PHONE_NUMBER present: {bool(RECIPIENT_PHONE_NUMBER)}")
         
         # Get today's tasks
         app.logger.info("Fetching today's tasks...")
@@ -724,19 +686,12 @@ def send_daily_reminder():
         app.logger.info(f"Found tasks for {day}: {tasks}")
         
         if tasks:
-            # Create a more engaging and supportive message
-            message = f"""Hey there! 🌅 Hope you got some rest last night!
-
-I've got your tasks for {day} right here. Remember, we can always adjust these based on how you're feeling - no pressure to do everything perfectly!
-
-"""
+            # Create a more engaging message
+            message = f"Good morning! 🌅 Here are your tasks for {day}:\n\n"
             for i, task in enumerate(tasks, 1):
-                message += f"🔹 {task}\n"
+                message += f"{i}. {task}\n"
             
-            message += """
-Just take it one small step at a time - you've got this, and I'm here to cheer you on! 
-
-Want to break any of these down into smaller bits? Just let me know! 💫"""
+            message += "\nHave a productive day! 💪"
             
             app.logger.info(f"Prepared message to send: {message}")
             
@@ -838,32 +793,85 @@ def cron_daily_reminder():
             'message': str(e)
         }), 500
 
+def send_message(message_text):
+    """Send a message using the WhatsApp API."""
+    try:
+        app.logger.info("Starting send_message function")
+        
+        if not all([WHATSAPP_TOKEN, PHONE_NUMBER_ID, RECIPIENT_PHONE_NUMBER]):
+            app.logger.error("Missing WhatsApp configuration:")
+            app.logger.error(f"WHATSAPP_TOKEN: {'*' * 8 if WHATSAPP_TOKEN else 'MISSING'}")
+            app.logger.error(f"PHONE_NUMBER_ID: {PHONE_NUMBER_ID if PHONE_NUMBER_ID else 'MISSING'}")
+            app.logger.error(f"RECIPIENT_PHONE_NUMBER: {RECIPIENT_PHONE_NUMBER if RECIPIENT_PHONE_NUMBER else 'MISSING'}")
+            return False
+
+        url = f"https://graph.facebook.com/v17.0/{PHONE_NUMBER_ID}/messages"
+        app.logger.info(f"Sending to WhatsApp API URL: {url}")
+        
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "messaging_product": "whatsapp",
+            "to": RECIPIENT_PHONE_NUMBER,
+            "type": "text",
+            "text": {"body": message_text}
+        }
+        
+        app.logger.info("Sending request to WhatsApp API with data:")
+        app.logger.info(f"To: {RECIPIENT_PHONE_NUMBER}")
+        app.logger.info(f"Message length: {len(message_text)} characters")
+        
+        response = requests.post(url, headers=headers, json=data)
+        
+        app.logger.info(f"WhatsApp API Response Status: {response.status_code}")
+        app.logger.info(f"WhatsApp API Response: {response.text}")
+        
+        if response.status_code == 200:
+            app.logger.info("WhatsApp message sent successfully")
+            return True
+        else:
+            app.logger.error(f"Failed to send WhatsApp message. Status: {response.status_code}")
+            app.logger.error(f"Error Response: {response.text}")
+            app.logger.error("Request details:")
+            app.logger.error(f"URL: {url}")
+            app.logger.error(f"Headers: Authorization: Bearer [REDACTED], Content-Type: {headers['Content-Type']}")
+            app.logger.error(f"Data: {json.dumps(data)}")
+            return False
+            
+    except Exception as e:
+        app.logger.error(f"Error sending WhatsApp message: {str(e)}")
+        app.logger.exception("Full traceback:")
+        return False
+
 def send_sunday_planning_message():
     """Send the Sunday planning message to help prepare for the week ahead."""
     try:
         app.logger.info("Starting send_sunday_planning_message function")
         
-        message = """Hey friend! 🌅 Happy Sunday! 
+        # Check WhatsApp credentials
+        if not all([WHATSAPP_TOKEN, PHONE_NUMBER_ID, RECIPIENT_PHONE_NUMBER]):
+            app.logger.error("Missing WhatsApp configuration")
+            app.logger.error(f"WHATSAPP_TOKEN present: {bool(WHATSAPP_TOKEN)}")
+            app.logger.error(f"PHONE_NUMBER_ID present: {bool(PHONE_NUMBER_ID)}")
+            app.logger.error(f"RECIPIENT_PHONE_NUMBER present: {bool(RECIPIENT_PHONE_NUMBER)}")
+            return False
 
-I know planning can be overwhelming sometimes, so let's make this gentle and flexible. Want to think about what you might like to focus on this week? 
+        message = """🌅 Happy Sunday! Let's plan for a successful week ahead.
 
-No pressure for a perfect plan - we can always adjust as we go! If it helps, you can share your thoughts like this:
+Please share your tasks for the upcoming week in this format:
 
 Monday:
-- Something you'd like to tackle
-- Another thing if you're up for it
-- Maybe something else?
+- Task 1
+- Task 2
+- Task 3
 
 Tuesday:
-[and so on...]
+[continue for each day...]
 
-Remember:
-✨ We can break these down into smaller steps later
-🌱 It's okay if things change
-💫 You don't need to fill every day
-🫂 I'm here to support you, not judge you
-
-What feels possible to you this week? 💝"""
+This will help you stay organized and focused! 📝✨"""
 
         # Send the message
         app.logger.info("Attempting to send Sunday planning message...")
@@ -1349,18 +1357,18 @@ def handle_voice_checkin(message):
         # Save to sheet
         if save_mood_data(transcription, analysis):
             # Send confirmation with mood insights
-            confirmation = f"""Thank you for sharing with me 💝 
+            confirmation = f"""Thanks for checking in! 🎯
 
-I really hear what you're saying, and I want you to know your feelings are completely valid. Here's what I picked up from our chat:
-
-• Overall vibe: {analysis['primary_emotion']} ({analysis['mood_score']}/10)
+I heard you and here's what I gathered:
+• Mood: {analysis['mood_score']}/10
+• Overall feeling: {analysis['primary_emotion']}
 • Energy level: {analysis['energy_level']}
-• Things on your mind: {analysis['key_topics']}
+• Topics discussed: {analysis['key_topics']}
 
-{f"I noticed you mentioned some things you want to work on: {analysis['action_items']}" if analysis.get('action_items') else ''}
-{f"I'll check in with you about this later - you don't have to handle it alone 🫂" if analysis.get('follow_up_needed') == 'Yes' else ''}
+{f"Action items noted: {analysis['action_items']}" if analysis.get('action_items') else ''}
+{f"I'll make sure to follow up with you on this." if analysis.get('follow_up_needed') == 'Yes' else ''}
 
-Remember, you're doing the best you can with the energy you have right now, and that's enough. 💫 I'm here if you need anything!"""
+Keep taking care of yourself! 🌟"""
             
             send_message(confirmation)
             return True
@@ -1370,45 +1378,6 @@ Remember, you're doing the best you can with the energy you have right now, and 
     except Exception as e:
         app.logger.error(f"Error handling voice check-in: {str(e)}")
         return False
-
-def handle_energy_response(message_text: str) -> Tuple[bool, List[str]]:
-    """Handle the response to the energy check-in."""
-    try:
-        # Classify the energy level
-        energy_level, confidence = energy_classifier.classify_energy(message_text)
-        
-        # Get appropriate response
-        response = energy_classifier.get_response(energy_level)
-        
-        # Get today's tasks
-        today_data = get_todays_tasks()
-        if not today_data:
-            send_message(response + "\n\nNo tasks scheduled for today.")
-            return True, []
-            
-        tasks = today_data['tasks']
-        
-        # Modify tasks based on energy level
-        if energy_classifier.should_modify_tasks(energy_level):
-            tasks = energy_classifier.get_task_modification(energy_level, tasks)
-            
-        # Send response with modified tasks
-        if tasks:
-            task_message = "\n\n"
-            if energy_level != EnergyLevel.DISTRESS:
-                task_message += "Here's what we can focus on:\n\n"
-                for i, task in enumerate(tasks, 1):
-                    task_message += f"{i}. {task}\n"
-            
-            send_message(response + task_message)
-        else:
-            send_message(response)
-            
-        return True, tasks
-        
-    except Exception as e:
-        app.logger.error(f"Error handling energy response: {str(e)}")
-        return False, []
 
 if __name__ == '__main__':
     # Get port from environment variable for Railway

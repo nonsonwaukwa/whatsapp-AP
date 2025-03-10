@@ -8,8 +8,8 @@ from urllib.parse import urljoin
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def trigger_energy_checkin():
-    """Trigger the morning energy level check-in."""
+def trigger_daily_reminder():
+    """Trigger the daily reminder by calling the webhook endpoint."""
     try:
         # Get the app URL and cron secret from environment
         app_url = os.environ.get('APP_URL', '').rstrip('/')  # Remove trailing slashes
@@ -18,9 +18,14 @@ def trigger_energy_checkin():
         if not app_url or not cron_secret:
             logger.error("Missing required environment variables (APP_URL or CRON_SECRET)")
             return False
+        
+        # Temporarily commenting out weekend check for testing
+        # if datetime.now().weekday() >= 5:  # 5 and 6 are Saturday and Sunday
+        #     logger.info("Skipping reminder - it's the weekend")
+        #     return True
             
         # Construct proper URL
-        webhook_url = urljoin(app_url, '/send-energy-checkin')
+        webhook_url = urljoin(app_url, '/cron/daily-reminder')
         logger.info(f"Sending request to: {webhook_url}")
         
         # Make the request to the webhook
@@ -31,10 +36,10 @@ def trigger_energy_checkin():
         )
         
         if response.status_code == 200:
-            logger.info("Energy check-in triggered successfully")
+            logger.info("Daily reminder triggered successfully")
             return True
         else:
-            logger.error(f"Failed to trigger energy check-in. Status code: {response.status_code}")
+            logger.error(f"Failed to trigger daily reminder. Status code: {response.status_code}")
             logger.error(f"Response: {response.text}")
             # Print more detailed error information
             logger.error(f"Request URL: {webhook_url}")
@@ -47,9 +52,9 @@ def trigger_energy_checkin():
             return False
             
     except Exception as e:
-        logger.error(f"Error triggering energy check-in: {str(e)}")
+        logger.error(f"Error triggering daily reminder: {str(e)}")
         return False
-
+    
 if __name__ == "__main__":
     # Skip execution during build time
     if os.environ.get('RAILWAY_ENVIRONMENT') == 'nixpacks':
@@ -64,7 +69,6 @@ if __name__ == "__main__":
         logger.error("CRON_SECRET environment variable is not set")
         exit(1)
     
-    # First trigger the energy check-in
-    success = trigger_energy_checkin()
+    success = trigger_daily_reminder()
     # Exit with appropriate status code
     exit(0 if success else 1) 
