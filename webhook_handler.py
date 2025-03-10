@@ -92,6 +92,7 @@ MESSAGE_CACHE_TTL = 300  # 5 minutes in seconds
 CHECKIN_CACHE = OrderedDict()
 CHECKIN_CACHE_TTL = 300  # 5 minutes
 MORNING_CHECKIN_WINDOW = 300  # 5 minutes window to consider a message as a check-in response
+DAILY_ENERGY_LEVELS = {}  # Store energy levels for the day
 
 def is_duplicate_message(message_id):
     """Check if a message has been recently processed."""
@@ -504,17 +505,22 @@ def webhook():
                 energy_level = detect_energy_level(message_text)
                 app.logger.info(f"Detected energy level: {energy_level}")
                 
+                # Save the energy level for later use
+                save_energy_level(energy_level)
+                
                 today_data = get_todays_tasks()
                 if today_data and today_data['tasks']:
                     response = get_energy_response(energy_level, today_data['tasks'])
-                    app.logger.info(f"Sending energy-based response: {response}")
-                    send_message(response)
-                    return jsonify({
-                        'status': 'success',
-                        'message': 'Energy response sent'
-                    }), 200
+                    if send_message(response):
+                        app.logger.info("Sent energy-based response successfully")
+                        return jsonify({
+                            'status': 'success',
+                            'message': 'Energy response sent'
+                        }), 200
+                    else:
+                        app.logger.error("Failed to send energy-based response")
                 else:
-                    app.logger.warning("No tasks found for energy response")
+                    app.logger.info("No tasks found for energy-based response")
             
             # Handle other message types as before...
             if message_text.strip().startswith('status update:'):
@@ -1104,40 +1110,97 @@ def send_interactive_message(header_text, body_text, buttons):
         app.logger.exception("Full traceback:")
         return False
 
+def save_energy_level(energy_level):
+    """Save the user's energy level for the day."""
+    today = datetime.now().strftime('%Y-%m-%d')
+    DAILY_ENERGY_LEVELS[today] = energy_level
+
+def get_todays_energy_level():
+    """Get the user's energy level for today."""
+    today = datetime.now().strftime('%Y-%m-%d')
+    return DAILY_ENERGY_LEVELS.get(today, 'neutral')  # Default to neutral if not set
+
 def send_status_request():
-    """Send end-of-day status request for tasks."""
+    """Send end-of-day status request for tasks, adapted to user's energy level."""
     try:
         app.logger.info("Starting send_status_request function")
         
         # Check WhatsApp credentials first
         if not all([WHATSAPP_TOKEN, PHONE_NUMBER_ID, RECIPIENT_PHONE_NUMBER]):
-            app.logger.error("Missing WhatsApp credentials:")
-            app.logger.error(f"WHATSAPP_TOKEN present: {bool(WHATSAPP_TOKEN)}")
-            app.logger.error(f"PHONE_NUMBER_ID present: {bool(PHONE_NUMBER_ID)}")
-            app.logger.error(f"RECIPIENT_PHONE_NUMBER present: {bool(RECIPIENT_PHONE_NUMBER)}")
+            app.logger.error("Missing WhatsApp credentials")
             return False
 
-        # Get today's tasks
-        app.logger.info("Fetching today's tasks...")
+        # Get today's tasks and energy level
         today_data = get_todays_tasks()
+        energy_level = get_todays_energy_level()
+        app.logger.info(f"User's energy level today: {energy_level}")
         
         if not today_data:
-            app.logger.info("No tasks found for today to request status updates")
+            app.logger.info("No tasks found for today")
             return False
 
         tasks = today_data['tasks']
         day = today_data['day']
         
-        app.logger.info(f"Found {len(tasks)} tasks for {day}")
-        app.logger.debug(f"Tasks: {tasks}")
-        
-        if tasks:
-            # Send one message per task
+        if not tasks:
+            app.logger.info("No tasks to request status for")
+            return False
+
+        if energy_level == 'distress':
+            # Send a caring check-in instead of task status
+            message = """Just checking in 💜 How are you feeling now? No pressure about tasks today.
+
+Remember:
+• Your wellbeing comes first
+• It's okay to take breaks
+• We can look at tasks when you're ready"""
+            return send_message(message)
+
+        elif energy_level == 'low':
+            # Randomly select one task for low energy days
+            import random
+            task = random.choice(tasks)
+            task_index = tasks.index(task) + 1
+            
+            header_text = "Gentle Check-in 💛"
+            body_text = f"How's it going with this one task we focused on?\n\n{task}"
+            
+            buttons = [
+                {
+                    "type": "reply",
+                    "reply": {
+                        "id": f"task_{task_index}_complete",
+                        "title": "✅ Done"
+                    }
+                },
+                {
+                    "type": "reply",
+                    "reply": {
+                        "id": f"task_{task_index}_progress",
+                        "title": "🟡 In Progress"
+                    }
+                },
+                {
+                    "type": "reply",
+                    "reply": {
+                        "id": f"task_{task_index}_incomplete",
+                        "title": "❌ Stuck"
+                    }
+                }
+            ]
+            
+            return send_interactive_message(header_text, body_text, buttons)
+
+        else:  # high or neutral energy
+            # Send one message per task with appropriate tone
             for i, task in enumerate(tasks, 1):
-                header_text = f"Task {i} Status Update"
-                body_text = f"How did you do on this task?\n\n{task}"
+                if energy_level == 'high':
+                    header_text = f"Task {i} Progress 🌟"
+                    body_text = f"Awesome day so far! How's it going with:\n\n{task}"
+                else:  # neutral
+                    header_text = f"Task {i} Check-in"
+                    body_text = f"Time for a quick check-in! How's it going with:\n\n{task}"
                 
-                # Create buttons for this task
                 buttons = [
                     {
                         "type": "reply",
@@ -1168,9 +1231,6 @@ def send_status_request():
                 
             app.logger.info("All task status requests sent successfully")
             return True
-        else:
-            app.logger.info("No tasks to request status for")
-            return False
 
     except Exception as e:
         app.logger.error(f"Error sending status request: {str(e)}")

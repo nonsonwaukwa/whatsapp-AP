@@ -18,19 +18,13 @@ def trigger_status_request():
         if not app_url or not cron_secret:
             logger.error("Missing required environment variables (APP_URL or CRON_SECRET)")
             return False
-        
-        # Check if it's a weekday (0-4 are Monday to Friday)
-        current_day = datetime.now().weekday()
-        if current_day >= 5:  # 5 and 6 are Saturday and Sunday
-            logger.info("Weekend detected - skipping status request")
-            return True
             
         # Construct proper URL
         webhook_url = urljoin(app_url, '/send-status-request')
         logger.info(f"Sending request to: {webhook_url}")
         
-        # Make the request to the webhook
-        response = requests.get(
+        # Make the request to the webhook using POST
+        response = requests.post(
             webhook_url,
             headers={"X-Railway-Secret": cron_secret},
             timeout=30  # 30 second timeout
@@ -38,6 +32,7 @@ def trigger_status_request():
         
         if response.status_code == 200:
             logger.info("Task status request triggered successfully")
+            logger.info(f"Response: {response.text}")
             return True
         else:
             logger.error(f"Failed to trigger task status request. Status code: {response.status_code}")
