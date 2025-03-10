@@ -1034,48 +1034,41 @@ def send_status_request():
         app.logger.debug(f"Tasks: {tasks}")
         
         if tasks:
-            header_text = "🌙 Task Status Update"
-            body_text = f"How did you do on your tasks for {day}?\n\n"
-            
+            # Send one message per task
             for i, task in enumerate(tasks, 1):
-                body_text += f"{i}. {task}\n"
-            
-            # Create buttons for each task
-            buttons = []
-            for i, task in enumerate(tasks, 1):
-                buttons.extend([
+                header_text = f"Task {i} Status Update"
+                body_text = f"How did you do on this task?\n\n{task}"
+                
+                # Create buttons for this task
+                buttons = [
                     {
                         "type": "reply",
                         "reply": {
                             "id": f"task_{i}_complete",
-                            "title": f"Task {i} ✅"
+                            "title": "✅ Done"
                         }
                     },
                     {
                         "type": "reply",
                         "reply": {
                             "id": f"task_{i}_progress",
-                            "title": f"Task {i} 🟡"
+                            "title": "🟡 In Progress"
                         }
                     },
                     {
                         "type": "reply",
                         "reply": {
                             "id": f"task_{i}_incomplete",
-                            "title": f"Task {i} ❌"
+                            "title": "❌ Stuck"
                         }
                     }
-                ])
-            
-            # WhatsApp only allows up to 3 buttons, so we'll send multiple messages if needed
-            button_groups = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
-            
-            for group in button_groups:
-                if not send_interactive_message(header_text, body_text, group):
-                    app.logger.error("Failed to send status request via WhatsApp")
+                ]
+                
+                if not send_interactive_message(header_text, body_text, buttons):
+                    app.logger.error(f"Failed to send status request for task {i}")
                     return False
-            
-            app.logger.info("Status request sent successfully")
+                
+            app.logger.info("All task status requests sent successfully")
             return True
         else:
             app.logger.info("No tasks to request status for")
