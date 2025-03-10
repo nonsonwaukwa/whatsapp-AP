@@ -90,9 +90,41 @@ MESSAGE_CACHE_TTL = 300  # 5 minutes in seconds
 
 # Add to the constants at the top of the file
 CHECKIN_CACHE = OrderedDict()
-CHECKIN_CACHE_TTL = 300  # 5 minutes
-MORNING_CHECKIN_WINDOW = 300  # 5 minutes window to consider a message as a check-in response
+CHECKIN_CACHE_TTL = 86400  # 24 hours (full day) to track check-in responses
+MORNING_CHECKIN_WINDOW = 86400  # 24 hours window to consider a message as a check-in response
 DAILY_ENERGY_LEVELS = {}  # Store energy levels for the day
+LAST_CHECKIN_TIME = {}  # Track when check-ins were sent
+
+# Add varied end-of-day messages for no-response cases
+END_OF_DAY_MESSAGES = [
+    """Hey there 💫 I noticed we didn't get to check in today, and that's completely okay! 
+    
+Sometimes days just flow differently, and that's part of being human. I'm here whenever you're ready to chat.""",
+
+    """Gentle reminder that you don't need to be "on" every day 🌙
+    
+Some days are for doing, others are for being. Hope you're taking care of yourself!""",
+
+    """Just dropping by to say it's okay if today wasn't a check-in day 💝
+    
+Life happens, and you're allowed to take the space you need. Tomorrow is a fresh start if you want it.""",
+
+    """Hey friend 🌟 No pressure about missing today's check-in!
+    
+Sometimes self-care means letting go of routines, and that's perfectly valid. I'll be here tomorrow.""",
+
+    """Sending you peaceful evening vibes ✨
+    
+Whether today was busy, overwhelming, or just different - it's all okay. Your wellbeing matters more than any check-in.""",
+
+    """Hi there 💜 Just wanted you to know that it's totally fine we didn't connect today.
+    
+Some days are like that, and that's part of the journey. Take good care of yourself!""",
+
+    """Evening thoughts 🌅 Missing a check-in doesn't mean you're off track.
+    
+Sometimes the most mindful thing we can do is honor where we're at. Hope your day held some gentle moments."""
+]
 
 def is_duplicate_message(message_id):
     """Check if a message has been recently processed."""
@@ -766,15 +798,55 @@ Your tasks will be here when you're ready. Want to talk about what's on your min
     
     return response
 
-def send_morning_checkin():
-    """Send morning energy check-in message."""
-    message = """Good morning! 🌅
+def send_end_of_day_checkin():
+    """Send a gentle end-of-day message if there was no response to morning check-in."""
+    try:
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # Only send if we haven't received a response today
+        if today not in DAILY_ENERGY_LEVELS:
+            # Choose a random message from our collection
+            import random
+            message = random.choice(END_OF_DAY_MESSAGES)
+            
+            if send_message(message):
+                app.logger.info("End-of-day gentle check-in sent successfully")
+                return True
+        return False
+    except Exception as e:
+        app.logger.error(f"Error sending end-of-day check-in: {str(e)}")
+        return False
 
-How are you feeling today? 
+@app.route('/cron/end-of-day', methods=['POST'])
+def cron_end_of_day():
+    """Secure endpoint for Railway cron job to trigger end-of-day check-in."""
+    try:
+        # Verify the request is from Railway
+        secret = request.headers.get('X-Railway-Secret')
+        if not secret or secret != CRON_SECRET:
+            app.logger.warning("Unauthorized cron job attempt")
+            return jsonify({
+                'status': 'error',
+                'message': 'Unauthorized'
+            }), 401
 
-Just reply naturally - are you feeling energized, okay, tired, or something else? I'll adjust today's plan based on your energy levels."""
-    
-    return send_message(message)
+        if send_end_of_day_checkin():
+            return jsonify({
+                'status': 'success',
+                'message': 'End-of-day check-in sent successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'success',
+                'message': 'No end-of-day check-in needed'
+            })
+
+    except Exception as e:
+        app.logger.error(f"End-of-day cron error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 def send_daily_reminder():
     """Send daily reminder based on tasks from Google Sheets."""
@@ -1546,13 +1618,18 @@ def is_morning_checkin_response(message):
         # Get the timestamp of the message
         timestamp = int(message.get('timestamp', 0))
         current_time = int(time.time())
+        today = datetime.now().strftime('%Y-%m-%d')
         
         # Check if this is a text message
         if message.get('type') != 'text':
             return False
             
-        # Check if we received any messages in the last 5 minutes after sending a check-in
+        # Check if we received any messages within the check-in window
         if current_time - timestamp <= MORNING_CHECKIN_WINDOW:
+            # Don't process if we already have an energy level for today
+            if today in DAILY_ENERGY_LEVELS:
+                return False
+                
             # Get the message text
             message_text = message.get('text', {}).get('body', '').lower()
             
