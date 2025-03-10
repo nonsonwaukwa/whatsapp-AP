@@ -724,7 +724,7 @@ def trigger_reminder():
         else:
             return jsonify({
                 'status': 'error',
-                'message': 'Failed to send daily reminder'
+                'message': 'Failed to send sssasadaily reminder'
             }), 400
     except Exception as e:
         return jsonify({
@@ -859,7 +859,7 @@ def send_sunday_planning_message():
             app.logger.error(f"RECIPIENT_PHONE_NUMBER present: {bool(RECIPIENT_PHONE_NUMBER)}")
             return False
 
-        message = """🌅 Happy Sunday! Let's plan for a successful week ahead.
+        message = """🌅 Happy Sundaasasasasasasasy! Let's plan for a successful week ahead.
 
 Please share your tasks for the upcoming week in this format:
 
