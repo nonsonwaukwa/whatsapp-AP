@@ -91,6 +91,7 @@ MESSAGE_CACHE_TTL = 300  # 5 minutes in seconds
 # Add to the constants at the top of the file
 CHECKIN_CACHE = OrderedDict()
 CHECKIN_CACHE_TTL = 300  # 5 minutes
+MORNING_CHECKIN_WINDOW = 300  # 5 minutes window to consider a message as a check-in response
 
 def is_duplicate_message(message_id):
     """Check if a message has been recently processed."""
@@ -494,30 +495,28 @@ def webhook():
         message_type = message.get('type')
         
         if message_type == 'text':
-            message_text = message.get('text', {}).get('body', '').lower()
+            message_text = message.get('text', {}).get('body', '')
+            app.logger.info(f"Received text message: {message_text}")
             
             # Check if this is a morning check-in response
-            if is_morning_checkin_response(message_id):
+            if is_morning_checkin_response(message):
+                app.logger.info("Detected morning check-in response")
                 energy_level = detect_energy_level(message_text)
-                today_data = get_todays_tasks()
+                app.logger.info(f"Detected energy level: {energy_level}")
                 
+                today_data = get_todays_tasks()
                 if today_data and today_data['tasks']:
                     response = get_energy_response(energy_level, today_data['tasks'])
+                    app.logger.info(f"Sending energy-based response: {response}")
                     send_message(response)
                     return jsonify({
                         'status': 'success',
                         'message': 'Energy response sent'
                     }), 200
+                else:
+                    app.logger.warning("No tasks found for energy response")
             
-            # Check if this is a request for voice check-in
-            if 'check in' in message_text or 'checkin' in message_text:
-                if send_checkin_prompt():
-                    return jsonify({
-                        'status': 'success',
-                        'message': 'Check-in prompt sent'
-                    }), 200
-            
-            # Handle other text messages as before
+            # Handle other message types as before...
             if message_text.strip().startswith('status update:'):
                 updates = parse_status_update(message_text)
                 if updates and save_status_updates(updates):
@@ -1481,16 +1480,34 @@ Keep taking care of yourself! 🌟"""
         app.logger.error(f"Error handling voice check-in: {str(e)}")
         return False
 
-def is_morning_checkin_response(message_id):
+def is_morning_checkin_response(message):
     """Check if this message is a response to morning check-in."""
-    current_time = time.time()
-    
-    # Clean old entries
-    for mid, timestamp in list(CHECKIN_CACHE.items()):
-        if current_time - timestamp > CHECKIN_CACHE_TTL:
-            CHECKIN_CACHE.pop(mid)
-    
-    return message_id in CHECKIN_CACHE
+    try:
+        # Get the timestamp of the message
+        timestamp = int(message.get('timestamp', 0))
+        current_time = int(time.time())
+        
+        # Check if this is a text message
+        if message.get('type') != 'text':
+            return False
+            
+        # Check if we received any messages in the last 5 minutes after sending a check-in
+        if current_time - timestamp <= MORNING_CHECKIN_WINDOW:
+            # Get the message text
+            message_text = message.get('text', {}).get('body', '').lower()
+            
+            # Check if this looks like a response to "how are you feeling?"
+            feeling_indicators = {'feeling', 'feel', 'am', "i'm", 'im', 'doing', 'okay', 'good', 'great', 'tired', 'exhausted', 'fine'}
+            words = set(message_text.split())
+            
+            # If there's any overlap between the words and feeling indicators, consider it a check-in response
+            return bool(words.intersection(feeling_indicators))
+            
+        return False
+        
+    except Exception as e:
+        app.logger.error(f"Error checking for morning check-in response: {str(e)}")
+        return False
 
 if __name__ == '__main__':
     # Get port from environment variable for Railway
