@@ -29,7 +29,7 @@ def trigger_sunday_planning():
         logger.info(f"Sending request to: {webhook_url}")
         
         # Make the request to the webhook
-        response = requests.get(
+        response = requests.post(
             webhook_url,
             headers={"X-Railway-Secret": cron_secret},
             timeout=30  # 30 second timeout
