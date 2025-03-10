@@ -3,6 +3,7 @@ import logging
 import requests
 from datetime import datetime
 from urllib.parse import urljoin
+from flask import Flask
 
 # Configure logging with more detail
 logging.basicConfig(
@@ -10,6 +11,13 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Create Flask app for health check
+app = Flask(__name__)
+
+@app.route('/health')
+def health_check():
+    return {"status": "healthy"}, 200
 
 def trigger_daily_reminder():
     """Trigger the daily reminder by calling the webhook endpoint."""
@@ -85,6 +93,10 @@ if __name__ == "__main__":
         if not os.environ.get('CRON_SECRET'):
             logger.error("CRON_SECRET environment variable is not set")
             exit(1)
+        
+        # Start Flask app for health checks
+        port = int(os.environ.get('PORT', 3000))
+        app.run(host='0.0.0.0', port=port)
         
         success = trigger_daily_reminder()
         logger.info("=== Daily Reminder Cron Finished ===")
