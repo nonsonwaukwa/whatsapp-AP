@@ -88,6 +88,10 @@ MESSAGE_CACHE = OrderedDict()
 MESSAGE_CACHE_MAX_SIZE = 100
 MESSAGE_CACHE_TTL = 300  # 5 minutes in seconds
 
+# Add to the constants at the top of the file
+CHECKIN_CACHE = OrderedDict()
+CHECKIN_CACHE_TTL = 300  # 5 minutes
+
 def is_duplicate_message(message_id):
     """Check if a message has been recently processed."""
     current_time = time.time()
@@ -492,6 +496,19 @@ def webhook():
         if message_type == 'text':
             message_text = message.get('text', {}).get('body', '').lower()
             
+            # Check if this is a morning check-in response
+            if is_morning_checkin_response(message_id):
+                energy_level = detect_energy_level(message_text)
+                today_data = get_todays_tasks()
+                
+                if today_data and today_data['tasks']:
+                    response = get_energy_response(energy_level, today_data['tasks'])
+                    send_message(response)
+                    return jsonify({
+                        'status': 'success',
+                        'message': 'Energy response sent'
+                    }), 200
+            
             # Check if this is a request for voice check-in
             if 'check in' in message_text or 'checkin' in message_text:
                 if send_checkin_prompt():
@@ -661,6 +678,99 @@ def get_todays_tasks():
         app.logger.error(f"Error getting today's tasks: {str(e)}")
         return None
 
+def detect_energy_level(message_text):
+    """Analyze message text to determine energy level."""
+    text = message_text.lower()
+    
+    # High energy indicators
+    high_energy = {
+        'pumped', 'excited', 'ready', 'motivated', 'energized', 'focused', 
+        "let's go", 'feeling great', 'on top of things', 'productive', 
+        'inspired', 'crushing it'
+    }
+    
+    # Neutral energy indicators
+    neutral_energy = {
+        'okay', 'fine', 'alright', 'meh', 'not bad', 'decent', 
+        'hanging in there', 'could be better', 'managing', 'doing my best'
+    }
+    
+    # Low energy indicators
+    low_energy = {
+        'tired', 'exhausted', 'drained', 'burnt out', 'overwhelmed', 
+        'stressed', 'anxious', 'struggling', "can't focus", 'not feeling it',
+        'heavy', 'unmotivated', 'foggy', 'no energy'
+    }
+    
+    # Distress signals
+    distress = {
+        'hopeless', 'defeated', 'stuck', 'numb', "can't do anything",
+        "what's the point", 'done with everything', 'just want to sleep',
+        'empty'
+    }
+    
+    # Count matches in each category
+    words = set(text.split())
+    high_matches = len(words.intersection(high_energy))
+    neutral_matches = len(words.intersection(neutral_energy))
+    low_matches = len(words.intersection(low_energy))
+    distress_matches = len(words.intersection(distress))
+    
+    # Determine energy level
+    if distress_matches > 0:
+        return 'distress'
+    elif high_matches > low_matches and high_matches > neutral_matches:
+        return 'high'
+    elif low_matches > 0:
+        return 'low'
+    else:
+        return 'neutral'
+
+def get_energy_response(energy_level, tasks):
+    """Get appropriate response based on energy level."""
+    if energy_level == 'high':
+        response = "Love that energy! 🌟 Here's your task list for today. Want to add a challenge?\n\n"
+        # Show all tasks
+        for i, task in enumerate(tasks, 1):
+            response += f"{i}. {task}\n"
+        response += "\nYou've got this! 💪"
+        
+    elif energy_level == 'neutral':
+        response = "Got it! Let's tackle these tasks one at a time. Need help prioritizing?\n\n"
+        # Show all tasks but with a gentler tone
+        for i, task in enumerate(tasks, 1):
+            response += f"{i}. {task}\n"
+        response += "\nRemember to take breaks when needed! 😊"
+        
+    elif energy_level == 'low':
+        # Show only the first task or the smallest task
+        response = "Sounds like today's a bit tough. Let's focus on just one small task for now:\n\n"
+        response += f"• {tasks[0]}\n\n"
+        response += "No pressure—you're doing your best. Take it one step at a time. 💛"
+        
+    else:  # distress
+        response = """I hear you. 💜 It's completely okay to take care of yourself today.
+
+Some gentle suggestions:
+• Take a few deep breaths
+• Have some water
+• Rest if you need to
+• Remember: you don't have to be productive right now
+
+Your tasks will be here when you're ready. Want to talk about what's on your mind?"""
+    
+    return response
+
+def send_morning_checkin():
+    """Send morning energy check-in message."""
+    message = """Good morning! 🌅
+
+How are you feeling today? 
+
+Just reply naturally - are you feeling energized, okay, tired, or something else? I'll adjust today's plan based on your energy levels."""
+    
+    return send_message(message)
+
 def send_daily_reminder():
     """Send daily reminder based on tasks from Google Sheets."""
     try:
@@ -744,9 +854,6 @@ def cron_daily_reminder():
         secret = request.headers.get('X-Railway-Secret')
         if not secret or secret != CRON_SECRET:
             app.logger.warning("Unauthorized cron job attempt")
-            app.logger.warning(f"Expected secret: {CRON_SECRET}, Got: {secret}")
-            app.logger.warning(f"Headers: {dict(request.headers)}")
-            app.logger.warning(f"Secret: {secret}")
             return jsonify({
                 'status': 'error',
                 'message': 'Unauthorized'
@@ -755,36 +862,28 @@ def cron_daily_reminder():
         # Check if we have WhatsApp credentials
         if not all([WHATSAPP_TOKEN, PHONE_NUMBER_ID, RECIPIENT_PHONE_NUMBER]):
             app.logger.error("Missing WhatsApp configuration")
-            app.logger.error(f"WHATSAPP_TOKEN set: {bool(WHATSAPP_TOKEN)}")
-            app.logger.error(f"PHONE_NUMBER_ID set: {bool(PHONE_NUMBER_ID)}")
-            app.logger.error(f"RECIPIENT_PHONE_NUMBER set: {bool(RECIPIENT_PHONE_NUMBER)}")
             return jsonify({
                 'status': 'error',
                 'message': 'WhatsApp configuration missing'
             }), 400
 
-        # Temporarily commenting out weekend check for testing
-        # current_day = datetime.now().weekday()
-        # app.logger.info(f"Current day is {current_day} (0=Monday, 6=Sunday)")
+        app.logger.info("Proceeding with morning check-in")
         
-        # if current_day < 5:  # 0-4 are Monday to Friday
-        app.logger.info("Proceeding with reminder")
-        if send_daily_reminder():
+        # First send the morning check-in
+        if send_morning_checkin():
+            # Store the message ID in cache to track the response
+            message_id = str(int(time.time()))  # Simple timestamp-based ID
+            CHECKIN_CACHE[message_id] = time.time()
+            
             return jsonify({
                 'status': 'success',
-                'message': 'Daily reminder sent successfully'
+                'message': 'Morning check-in sent successfully'
             })
         else:
             return jsonify({
                 'status': 'error',
-                'message': 'Failed to send daily reminder'
+                'message': 'Failed to send morning check-in'
             }), 400
-        # else:
-        #     app.logger.info("Skipping reminder - it's the weekend")
-        #     return jsonify({
-        #         'status': 'success',
-        #         'message': 'Skipped - weekend'
-        #     })
 
     except Exception as e:
         app.logger.error(f"Cron job error: {str(e)}")
@@ -1381,6 +1480,17 @@ Keep taking care of yourself! 🌟"""
     except Exception as e:
         app.logger.error(f"Error handling voice check-in: {str(e)}")
         return False
+
+def is_morning_checkin_response(message_id):
+    """Check if this message is a response to morning check-in."""
+    current_time = time.time()
+    
+    # Clean old entries
+    for mid, timestamp in list(CHECKIN_CACHE.items()):
+        if current_time - timestamp > CHECKIN_CACHE_TTL:
+            CHECKIN_CACHE.pop(mid)
+    
+    return message_id in CHECKIN_CACHE
 
 if __name__ == '__main__':
     # Get port from environment variable for Railway

@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def trigger_daily_reminder():
-    """Trigger the daily reminder by calling the webhook endpoint."""
+    """Trigger the morning check-in by calling the webhook endpoint."""
     try:
         # Get the app URL and cron secret from environment
         app_url = os.environ.get('APP_URL', '').rstrip('/')  # Remove trailing slashes
@@ -24,7 +24,7 @@ def trigger_daily_reminder():
         #     logger.info("Skipping reminder - it's the weekend")
         #     return True
             
-        # Construct proper URL
+        # Construct proper URL for morning check-in
         webhook_url = urljoin(app_url, '/cron/daily-reminder')
         logger.info(f"Sending request to: {webhook_url}")
         
@@ -36,10 +36,10 @@ def trigger_daily_reminder():
         )
         
         if response.status_code == 200:
-            logger.info("Daily reminder triggered successfully")
+            logger.info("Morning check-in triggered successfully")
             return True
         else:
-            logger.error(f"Failed to trigger daily reminder. Status code: {response.status_code}")
+            logger.error(f"Failed to trigger morning check-in. Status code: {response.status_code}")
             logger.error(f"Response: {response.text}")
             # Print more detailed error information
             logger.error(f"Request URL: {webhook_url}")
@@ -52,7 +52,7 @@ def trigger_daily_reminder():
             return False
             
     except Exception as e:
-        logger.error(f"Error triggering daily reminder: {str(e)}")
+        logger.error(f"Error triggering morning check-in: {str(e)}")
         return False
     
 if __name__ == "__main__":
