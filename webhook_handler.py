@@ -847,34 +847,18 @@ def send_message(message_text):
         return False
 
 def send_sunday_planning_message():
-    """Send the Sunday planning message to help prepare for the week ahead."""
+    """Send the Sunday planning message requesting tasks for the week."""
     try:
-        app.logger.info("Starting send_sunday_planning_message function")
-        
-        # Check WhatsApp credentials
-        if not all([WHATSAPP_TOKEN, PHONE_NUMBER_ID, RECIPIENT_PHONE_NUMBER]):
-            app.logger.error("Missing WhatsApp configuration")
-            app.logger.error(f"WHATSAPP_TOKEN present: {bool(WHATSAPP_TOKEN)}")
-            app.logger.error(f"PHONE_NUMBER_ID present: {bool(PHONE_NUMBER_ID)}")
-            app.logger.error(f"RECIPIENT_PHONE_NUMBER present: {bool(RECIPIENT_PHONE_NUMBER)}")
-            return False
+        message = """🌟 Weekly Planning Time! 
 
-        message = """🌅 Happy Sunday! Let's plan for a successful week ahead.
+Let's plan your tasks for the upcoming week. Please reply with your tasks in this format:
 
-Please share your tasks for the upcoming week in this format:
+Monday: Task 1, Task 2, Task 3
+Tuesday: Task 1, Task 2, Task 3
+Wednesday: Task 1, Task 2, Task 3
+Thursday: Task 1, Task 2, Task 3
+Friday: Task 1, Task 2, Task 3"""
 
-Monday:
-- Task 1
-- Task 2
-- Task 3
-
-Tuesday:
-[continue for each day...]
-
-This will help you stay organized and focused! 📝✨"""
-
-        # Send the message
-        app.logger.info("Attempting to send Sunday planning message...")
         if send_message(message):
             app.logger.info("Sunday planning message sent successfully")
             return True
@@ -883,14 +867,34 @@ This will help you stay organized and focused! 📝✨"""
             return False
 
     except Exception as e:
-        app.logger.error(f"Error in send_sunday_planning_message: {str(e)}")
-        app.logger.exception("Full traceback:")
+        app.logger.error(f"Error sending Sunday planning message: {str(e)}")
         return False
 
-@app.route('/cron/sunday-planning', methods=['GET'])
+@app.route('/send-sunday-planning')
+def trigger_sunday_planning():
+    """Endpoint to manually trigger Sunday planning message."""
+    try:
+        if send_sunday_planning_message():
+            return jsonify({
+                'status': 'success',
+                'message': 'Sunday planning message sent successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to send Sunday planning message'
+            }), 400
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/cron/sunday-planning', methods=['POST'])
 def cron_sunday_planning():
     """Secure endpoint for Railway cron job to trigger Sunday planning message."""
     try:
+        # Log all headers for debugging
         app.logger.info("Received Sunday planning cron request")
         app.logger.info(f"Headers: {dict(request.headers)}")
         
@@ -907,33 +911,39 @@ def cron_sunday_planning():
         # Check if we have WhatsApp credentials
         if not all([WHATSAPP_TOKEN, PHONE_NUMBER_ID, RECIPIENT_PHONE_NUMBER]):
             app.logger.error("Missing WhatsApp configuration")
+            app.logger.error(f"WHATSAPP_TOKEN set: {bool(WHATSAPP_TOKEN)}")
+            app.logger.error(f"PHONE_NUMBER_ID set: {bool(PHONE_NUMBER_ID)}")
+            app.logger.error(f"RECIPIENT_PHONE_NUMBER set: {bool(RECIPIENT_PHONE_NUMBER)}")
             return jsonify({
                 'status': 'error',
                 'message': 'WhatsApp configuration missing'
             }), 400
 
-        # Check if it's Sunday
-        if datetime.now().weekday() == 6:  # 6 is Sunday
-            app.logger.info("Proceeding with Sunday planning message")
-            if send_sunday_planning_message():
-                return jsonify({
-                    'status': 'success',
-                    'message': 'Sunday planning message sent successfully'
-                })
-            else:
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Failed to send Sunday planning message'
-                }), 400
-        else:
-            app.logger.info("Not Sunday - skipping planning message")
+        # Only send on Sundays
+        current_day = datetime.now().weekday()
+        app.logger.info(f"Current day is {current_day} (0=Monday, 6=Sunday)")
+        
+        # if current_day == 6:  # Sunday
+        app.logger.info("Proceeding with planning message")
+        if send_sunday_planning_message():
             return jsonify({
                 'status': 'success',
-                'message': 'Skipped - not Sunday'
+                'message': 'Sunday planning message sent successfully'
             })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to send Sunday planning message'
+            }), 400
+        # else:
+        #     app.logger.info("Not Sunday, skipping planning message")
+        #     return jsonify({
+        #         'status': 'success',
+        #         'message': 'Skipped - not Sunday'
+        #     })
 
     except Exception as e:
-        app.logger.error(f"Sunday planning cron job error: {str(e)}")
+        app.logger.error(f"Sunday planning cron error: {str(e)}")
         return jsonify({
             'status': 'error',
             'message': str(e)

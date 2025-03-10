@@ -20,9 +20,9 @@ def trigger_sunday_planning():
             return False
         
         # Check if it's Sunday
-        if datetime.now().weekday() != 6:  # 6 is Sunday
-            logger.info("Not Sunday - skipping planning message")
-            return True
+        # if datetime.now().weekday() != 6:  # 6 is Sunday
+        #     logger.info("Not Sunday - skipping planning message")
+        #     return True
             
         # Construct proper URL
         webhook_url = urljoin(app_url, '/cron/sunday-planning')
