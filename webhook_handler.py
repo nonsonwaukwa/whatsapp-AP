@@ -1120,6 +1120,36 @@ def get_todays_energy_level():
     today = datetime.now().strftime('%Y-%m-%d')
     return DAILY_ENERGY_LEVELS.get(today, 'neutral')  # Default to neutral if not set
 
+@app.route('/send-status-request', methods=['GET', 'POST'])
+def trigger_status_request():
+    """Endpoint to manually trigger status request."""
+    try:
+        # Verify the request is from Railway if it's a POST request
+        if request.method == 'POST':
+            secret = request.headers.get('X-Railway-Secret')
+            if not secret or secret != CRON_SECRET:
+                app.logger.warning("Unauthorized cron job attempt")
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Unauthorized'
+                }), 401
+
+        if send_status_request():
+            return jsonify({
+                'status': 'success',
+                'message': 'Status request sent successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to send status request'
+            }), 400
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
 def send_status_request():
     """Send end-of-day status request for tasks, adapted to user's energy level."""
     try:
@@ -1236,26 +1266,6 @@ Remember:
         app.logger.error(f"Error sending status request: {str(e)}")
         app.logger.exception("Full traceback:")
         return False
-
-@app.route('/send-status-request')
-def trigger_status_request():
-    """Endpoint to manually trigger status request."""
-    try:
-        if send_status_request():
-            return jsonify({
-                'status': 'success',
-                'message': 'Status request sent successfully'
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': 'Failed to send status request'
-            }), 400
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
 
 def initialize_mood_tracker_sheet(service):
     """Initialize the mood tracker sheet with headers if it doesn't exist."""
